@@ -5,36 +5,31 @@ import { useState } from "react";
 export default function App() {
   const [expr, setExpr] = useState([]);
   const [result, setResult] = useState(null);
-  const [textInput, setTextInput] = useState("");
-  const [steps, setSteps] = useState([]); // State untuk menyimpan langkah penyelesaian
+  const [steps, setSteps] = useState([]); 
   const [showMatrixPicker, setShowMatrixPicker] = useState(false);
   
-  // State untuk Animasi/Visualisasi Perkalian
   const [animating, setAnimating] = useState(false);
   const [currentIdx, setCurrentIdx] = useState({ r: -1, c: -1 });
-  const [multFormula, setMultFormula] = useState("");
 
   /* ---------- INPUT HANDLERS ---------- */
   const handleBtnClick = (v) => {
-    // Reset langkah jika memulai input baru setelah hasil muncul
     if (result !== null && !animating) {
        setSteps([]);
        setResult(null);
+       setExpr([{ type: "symbol", value: v }]);
+       return;
     }
-    if (expr.length > 0) setExpr([...expr, { type: "symbol", value: v }]);
-    else setTextInput((prev) => prev + v);
+    setExpr([...expr, { type: "symbol", value: v }]);
   };
 
   const backspace = () => {
     if (expr.length > 0) setExpr(expr.slice(0, -1));
-    else setTextInput((prev) => prev.slice(0, -1));
   };
 
   const clear = () => {
     setExpr([]);
     setResult(null);
     setSteps([]);
-    setTextInput("");
     setAnimating(false);
     setCurrentIdx({ r: -1, c: -1 });
   };
@@ -52,181 +47,167 @@ export default function App() {
     setExpr(newExpr);
   };
 
-  /* ---------- ANIMATED MULTIPLICATION ---------- */
+  /* ---------- ANIMATIONS ---------- */
+  const startAdditionAnimation = (A, B) => {
+    if (A.length !== B.length || A[0].length !== B[0].length) {
+      setSteps(["Error: Ordo matriks harus sama!"]);
+      return;
+    }
+    setAnimating(true);
+    let r = 0, c = 0;
+    const res = Array(A.length).fill(0).map(() => Array(A[0].length).fill(0));
+    const interval = setInterval(() => {
+      const sum = A[r][c] + B[r][c];
+      res[r][c] = sum;
+      setResult([...res.map(row => [...row])]);
+      setCurrentIdx({ r, c });
+      setSteps(prev => [...prev, `Pos [${r+1},${c+1}]: ${A[r][c]} + ${B[r][c]} = ${sum}`]);
+      c++;
+      if (c >= A[0].length) { c = 0; r++; }
+      if (r >= A.length) { clearInterval(interval); setAnimating(false); setCurrentIdx({ r: -1, c: -1 }); }
+    }, 400);
+  };
+
+  const startScalarAnimation = (scalar, matrix) => {
+    setAnimating(true);
+    let r = 0, c = 0;
+    const res = Array(matrix.length).fill(0).map(() => Array(matrix[0].length).fill(0));
+    const interval = setInterval(() => {
+      const prod = scalar * matrix[r][c];
+      res[r][c] = prod;
+      setResult([...res.map(row => [...row])]);
+      setCurrentIdx({ r, c });
+      setSteps(prev => [...prev, `Pos [${r+1},${c+1}]: ${scalar} × ${matrix[r][c]} = ${prod}`]);
+      c++;
+      if (c >= matrix[0].length) { c = 0; r++; }
+      if (r >= matrix.length) { clearInterval(interval); setAnimating(false); setCurrentIdx({ r: -1, c: -1 }); }
+    }, 400);
+  };
+
   const startMatrixAnimation = (A, B) => {
+    if (A[0].length !== B.length) {
+      setSteps(["Error: Kolom A harus sama dengan Baris B!"]);
+      return;
+    }
     setAnimating(true);
     let r = 0, c = 0;
     const res = Array(A.length).fill(0).map(() => Array(B[0].length).fill(0));
-    const newSteps = ["Memulai perkalian matriks..."];
-    
     const interval = setInterval(() => {
       let sum = 0;
-      let formulaParts = [];
+      let formula = [];
       for (let k = 0; k < A[0].length; k++) {
         sum += A[r][k] * B[k][c];
-        formulaParts.push(`(${A[r][k]}×${B[k][c]})`);
+        formula.push(`(${A[r][k]}×${B[k][c]})`);
       }
-      
-      const stepText = `R[${r+1},${c+1}]: ${formulaParts.join(" + ")} = ${sum}`;
       res[r][c] = sum;
-      
-      // Update state
       setResult([...res.map(row => [...row])]);
       setCurrentIdx({ r, c });
-      setMultFormula(stepText);
-      setSteps(prev => [...prev, stepText]); // Tambahkan ke daftar langkah agar tetap muncul
-
+      setSteps(prev => [...prev, `R[${r+1},${c+1}]: ${formula.join("+")} = ${sum}`]);
       c++;
-      if (c >= B[0].length) {
-        c = 0;
-        r++;
-      }
-
-      if (r >= A.length) {
-        clearInterval(interval);
-        setAnimating(false);
-        setCurrentIdx({ r: -1, c: -1 });
-        setSteps(prev => [...prev, "Perkalian selesai!"]);
-      }
-    }, 1000); 
+      if (c >= B[0].length) { c = 0; r++; }
+      if (r >= A.length) { clearInterval(interval); setAnimating(false); setCurrentIdx({ r: -1, c: -1 }); }
+    }, 700);
   };
 
-  /* ---------- CALCULATE ---------- */
+  /* ---------- CALCULATE (SAFE) ---------- */
   const calculate = () => {
     try {
-      const matrices = expr.filter((e) => e.type === "matrix");
-      const ops = expr.filter((e) => e.type === "symbol");
+      const matrices = expr.filter(e => e.type === "matrix");
+      const ops = expr.filter(e => e.type === "symbol");
+      setSteps([]); 
 
-      if (matrices.length === 2 && ops[0]?.value === "×") {
-        setSteps([]); // Reset langkah sebelum mulai
+      // 1. Matriks + Matriks
+      if (matrices.length === 2 && expr.some(e => e.value === "+")) {
+        startAdditionAnimation(matrices[0].value, matrices[1].value);
+        return;
+      }
+      // 2. Matriks x Matriks
+      if (matrices.length === 2 && expr.some(e => e.value === "×")) {
         startMatrixAnimation(matrices[0].value, matrices[1].value);
         return;
       }
+      // 3. Skalar x Matriks (Cek jika ada angka diikuti tanda x dan matriks)
+      if (matrices.length === 1 && expr.some(e => e.value === "×")) {
+        const scalarValue = expr.find(e => e.type === "symbol" && !isNaN(e.value))?.value;
+        if (scalarValue) {
+          startScalarAnimation(parseFloat(scalarValue), matrices[0].value);
+          return;
+        }
+      }
 
-      // Normal Mode
-      const rawInput = expr.length > 0 ? expr.map((e) => e.value).join("") : textInput;
-      const finalSteps = [`Ekspresi: ${rawInput}`];
-      
-      const source = rawInput
-        .replace(/√\(/g, "Math.sqrt(")
-        .replace(/π/g, "Math.PI")
-        .replace(/\^/g, "**")
-        .replace(/×/g, "*")
-        .replace(/÷/g, "/")
-        .replace(/−/g, "-");
-      
-      const evalResult = eval(source);
-      finalSteps.push(`Menghitung hasil...`);
-      finalSteps.push(`Hasil akhir: ${evalResult}`);
-      
-      setSteps(finalSteps);
-      setResult(evalResult);
+      // 4. Hitungan Biasa (Jika tidak ada matriks, baru jalankan eval)
+      if (matrices.length === 0) {
+        const raw = expr.map(e => e.value).join("");
+        if (!raw) return;
+        const res = eval(raw.replace(/×/g, "*").replace(/÷/g, "/").replace(/−/g, "-").replace(/\^/g, "**"));
+        setResult(res);
+      } else {
+        setSteps(["Gunakan + atau × untuk operasi matriks"]);
+      }
     } catch (e) {
-      setResult("Error");
-      setSteps(["Terjadi kesalahan format."]);
+      setSteps(["Format Error"]);
     }
   };
-
-  /* ================= MATRIX COMPONENT ================= */
-  const MatrixEditable = ({ data, matrixIdx, highlightRow, highlightCol, isResult }) => (
-    <div style={styles.matrixContainer}>
-      {data.map((row, i) => (
-        <div key={i} style={{ display: "flex" }}>
-          {row.map((v, j) => (
-            <input
-              key={j}
-              type="number"
-              value={v}
-              onChange={(e) => !isResult && updateMatrix(matrixIdx, i, j, Number(e.target.value))}
-              disabled={isResult || animating}
-              style={{
-                ...styles.cellBase,
-                backgroundColor: i === highlightRow ? "#2196f3" : j === highlightCol ? "#ff9800" : "#222",
-                color: (i === highlightRow || j === highlightCol) ? "white" : "#00e676",
-                border: (i === highlightRow && j === highlightCol) ? "2px solid white" : "1px solid #444",
-              }}
-            />
-          ))}
-        </div>
-      ))}
-    </div>
-  );
 
   return (
     <div style={styles.page}>
       <div style={styles.calc}>
         {/* DISPLAY */}
         <div style={styles.display}>
-          {expr.length === 0 && !result && (
-            <input className="text-input" value={textInput} onChange={(e) => setTextInput(e.target.value)} placeholder="0" style={styles.textInput} />
-          )}
+          {expr.length === 0 && !result && <div style={{color:'#444'}}>0</div>}
           {expr.map((e, idx) => (
             e.type === "matrix" ? (
-              <MatrixEditable 
-                key={idx} 
-                data={e.value} 
-                matrixIdx={idx} 
-                highlightRow={idx === 0 ? currentIdx.r : -1} 
-                highlightCol={idx === 1 ? currentIdx.c : -1} 
-                isResult={false}
-              />
-            ) : <span key={idx} style={{ fontSize: 22 }}>{e.value}</span>
+              <MatrixBox key={idx} data={e.value} matrixIdx={idx} 
+                highlightRow={currentIdx.r} highlightCol={currentIdx.c}
+                onChange={(r,c,v) => updateMatrix(idx, r, c, v)} disabled={animating} />
+            ) : <span key={idx} style={{ fontSize: 22, margin: '0 2px' }}>{e.value}</span>
           ))}
         </div>
 
-        {/* PERMANENT STEPS BOX */}
+        {/* STEPS */}
         {steps.length > 0 && (
           <div style={styles.solutionBox}>
-            <div style={styles.solutionHeader}>CARA PENYELESAIAN:</div>
-            <div style={styles.stepsList}>
-              {steps.map((step, i) => (
-                <div key={i} style={styles.stepItem}>• {step}</div>
-              ))}
-            </div>
+            <div style={styles.solutionHeader}>LANGKAH:</div>
+            {steps.map((s, i) => <div key={i} style={styles.stepItem}>{s}</div>)}
           </div>
         )}
 
-        {/* RESULT AREA */}
+        {/* RESULT */}
         {result !== null && (
-          <div style={{ marginBottom: 15, borderTop: "1px solid #444", paddingTop: 10 }}>
-             {Array.isArray(result) ? (
-               <div style={{textAlign:'center'}}>
-                 <p style={{color:'#00e676', fontSize:12, marginBottom: 5}}>HASIL AKHIR:</p>
-                 <MatrixEditable data={result} isResult={true} highlightRow={currentIdx.r} highlightCol={currentIdx.c} />
-               </div>
-             ) : <div style={styles.finalRes}>= {result}</div>}
+          <div style={{paddingTop: 10, borderTop: '1px solid #333', marginBottom: 15}}>
+            {Array.isArray(result) ? (
+              <div style={{textAlign:'center'}}>
+                <p style={{color:'#00e676', fontSize:10}}>HASIL AKHIR:</p>
+                <MatrixBox data={result} readOnly />
+              </div>
+            ) : <div style={styles.finalRes}>= {result}</div>}
           </div>
         )}
 
         {/* MATH BAR */}
         <div style={styles.mathBar}>
-          <button style={styles.mathBtn} onClick={() => handleBtnClick("√(")}>√</button>
-          <button style={styles.mathBtn} onClick={() => handleBtnClick("^")}>x²</button>
-          <button style={styles.mathBtn} onClick={() => handleBtnClick("π")}>π</button>
-          <button style={styles.mathBtn} onClick={() => handleBtnClick("(")}>(</button>
-          <button style={styles.mathBtn} onClick={() => handleBtnClick(")")}>)</button>
+          {["√(", "π", "^", "(", ")"].map(b => (
+             <button key={b} style={styles.mathBtn} onClick={() => handleBtnClick(b)}>{b}</button>
+          ))}
           <button onClick={backspace} style={styles.delBtn}>DEL</button>
         </div>
 
-        {/* BUTTONS GRID */}
+        {/* GRID */}
         <div style={styles.grid}>
           {["7", "8", "9", "÷", "4", "5", "6", "×", "1", "2", "3", "−", "0", ".", "+"].map((b) => (
             <button key={b} style={styles.btn} onClick={() => handleBtnClick(b)}>{b}</button>
           ))}
           <button style={styles.equalBtn} onClick={calculate}>=</button>
-          <button style={styles.matrixBtn} onClick={() => setShowMatrixPicker(true)}>MATRIX</button>
+          <button style={styles.matrixBtn} onClick={() => setShowMatrixPicker(true)}>+ MATRIX</button>
           <button style={styles.clearBtn} onClick={clear}>C</button>
         </div>
       </div>
 
-      {/* MATRIX PICKER */}
       {showMatrixPicker && (
         <div style={styles.popup}>
-          <h3 style={{marginBottom: 20}}>Pilih Ordo Matriks</h3>
-          <div style={{ display: "flex", gap: 10 }}>
-            {[2, 3, 4].map(n => (
-              <button key={n} style={styles.popupBtn} onClick={() => createMatrix(n)}>{n}x{n}</button>
-            ))}
+          <h3 style={{marginBottom: 20}}>Pilih Ordo</h3>
+          <div style={{ display: "flex", gap: 15 }}>
+            {[2, 3, 4].map(n => <button key={n} style={styles.popupBtn} onClick={() => createMatrix(n)}>{n}x{n}</button>)}
           </div>
           <button onClick={() => setShowMatrixPicker(false)} style={styles.cancelBtn}>Batal</button>
         </div>
@@ -235,31 +216,46 @@ export default function App() {
   );
 }
 
-/* ================= STYLES ================= */
+/* ---------- COMPONENTS ---------- */
+const MatrixBox = ({ data, onChange, readOnly, highlightRow, highlightCol, disabled }) => (
+  <div style={styles.matrixContainer}>
+    {data.map((row, i) => (
+      <div key={i} style={{ display: "flex" }}>
+        {row.map((v, j) => (
+          <input key={j} type="number" value={v} disabled={readOnly || disabled}
+            onChange={(e) => onChange(i, j, Number(e.target.value))}
+            style={{
+              ...styles.cellBase,
+              backgroundColor: (i === highlightRow && j === highlightCol) ? "#2196f3" : "#222",
+              color: (i === highlightRow && j === highlightCol) ? "#fff" : "#00e676",
+              border: (i === highlightRow && j === highlightCol) ? "1px solid #fff" : "1px solid #444"
+            }} />
+        ))}
+      </div>
+    ))}
+  </div>
+);
+
+/* ---------- STYLES ---------- */
 const styles = {
   page: { minHeight: "100vh", background: "#111", display: "flex", padding: "20px", justifyContent: "center", alignItems: "flex-start", fontFamily: "sans-serif" },
-  calc: { width: 420, padding: 20, background: "#222", borderRadius: 24, color: "white", boxShadow: "0 10px 30px rgba(0,0,0,0.5)" },
+  calc: { width: 420, padding: 20, background: "#222", borderRadius: 24, color: "white", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" },
   display: { minHeight: 120, background: "#000", padding: 15, marginBottom: 15, borderRadius: 12, display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 8, border: "1px solid #333" },
-  textInput: { width: "100%", background: "transparent", border: "none", color: "white", fontSize: 22, outline: "none" },
-  
-  // Gaya baru untuk Box Langkah yang permanen
   solutionBox: { background: "#1a1a1a", padding: 12, borderRadius: 10, marginBottom: 15, borderLeft: "4px solid #2196f3", maxHeight: "150px", overflowY: "auto" },
-  solutionHeader: { fontSize: 11, color: "#2196f3", fontWeight: "bold", marginBottom: 8, letterSpacing: "1px" },
-  stepsList: { display: "flex", flexDirection: "column", gap: "4px" },
-  stepItem: { fontSize: 12, color: "#ddd", fontFamily: "monospace" },
-  
-  finalRes: { textAlign: "right", fontSize: 26, color: "#00e676", fontWeight: "bold" },
+  solutionHeader: { fontSize: 10, color: "#2196f3", fontWeight: "bold", marginBottom: 5 },
+  stepItem: { fontSize: 11, color: "#888", marginBottom: 2, fontFamily: 'monospace' },
+  finalRes: { textAlign: "right", fontSize: 28, color: "#00e676", fontWeight: 'bold' },
   mathBar: { display: "flex", gap: 5, marginBottom: 10 },
-  mathBtn: { flex: 1, padding: "12px 0", background: "#444", color: "white", border: "none", borderRadius: 8, cursor: "pointer" },
-  delBtn: { flex: 1.5, background: "#ff5722", color: "white", borderRadius: 8, fontWeight: "bold", border: "none", cursor: "pointer" },
+  mathBtn: { flex: 1, padding: "10px 0", background: "#444", color: "white", border: "none", borderRadius: 8, cursor: "pointer" },
+  delBtn: { flex: 1.5, background: "#ff5722", color: "white", borderRadius: 8, border: "none", fontWeight: 'bold' },
   grid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 },
-  btn: { padding: 15, fontSize: 18, background: "#333", color: "white", border: "none", borderRadius: 12, cursor: "pointer" },
-  equalBtn: { background: "#2196f3", color: "white", borderRadius: 12, border: "none", cursor: "pointer", fontSize: 20 },
-  clearBtn: { gridColumn: "span 2", background: "#d32f2f", color: "white", borderRadius: 12, border: "none", cursor: "pointer" },
-  matrixBtn: { gridColumn: "span 2", background: "#673ab7", color: "white", borderRadius: 12, border: "none", cursor: "pointer" },
+  btn: { padding: 18, fontSize: 18, background: "#333", color: "white", border: "none", borderRadius: 12, cursor: "pointer" },
+  equalBtn: { background: "#2196f3", color: "white", borderRadius: 12, border: "none", fontSize: 22 },
+  clearBtn: { gridColumn: "span 2", background: "#d32f2f", color: "white", borderRadius: 12, border: "none" },
+  matrixBtn: { gridColumn: "span 2", background: "#673ab7", color: "white", borderRadius: 12, border: "none" },
   matrixContainer: { borderLeft: "2px solid #fff", borderRight: "2px solid #fff", padding: "0 4px", display: "inline-block", margin: "5px" },
-  cellBase: { width: 42, height: 38, textAlign: "center", margin: 1, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, transition: "0.3s", fontSize: 14, outline: "none" },
-  popup: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", zIndex: 100 },
-  popupBtn: { padding: "15px 25px", background: "#2196f3", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 18 },
-  cancelBtn: { marginTop: 30, color: "#aaa", background: "none", border: "1px solid #444", padding: "8px 20px", borderRadius: 6, cursor: "pointer" }
+  cellBase: { width: 38, height: 32, textAlign: "center", margin: 1, borderRadius: 4, fontSize: 12, outline: "none", transition: '0.3s' },
+  popup: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.95)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", zIndex: 100 },
+  popupBtn: { padding: "15px 30px", background: "#2196f3", color: "white", border: "none", borderRadius: 12, fontSize: 18, fontWeight: 'bold' },
+  cancelBtn: { marginTop: 30, color: "#aaa", background: "none", border: "1px solid #444", padding: "8px 20px", borderRadius: 6 }
 };
