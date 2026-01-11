@@ -1,13 +1,11 @@
 import { useState } from "react";
 
 /* ================= APP ================= */
-
 export default function App() {
   const [expr, setExpr] = useState([]);
   const [result, setResult] = useState(null);
   const [steps, setSteps] = useState([]); 
   const [showMatrixPicker, setShowMatrixPicker] = useState(false);
-  
   const [animating, setAnimating] = useState(false);
   const [currentIdx, setCurrentIdx] = useState({ r: -1, c: -1 });
 
@@ -43,12 +41,15 @@ export default function App() {
 
   const updateMatrix = (matrixIdx, rowIdx, colIdx, newValue) => {
     const newExpr = [...expr];
-    newExpr[matrixIdx].value[rowIdx][colIdx] = newValue;
-    setExpr(newExpr);
+    if (newExpr[matrixIdx]) {
+      newExpr[matrixIdx].value[rowIdx][colIdx] = newValue;
+      setExpr(newExpr);
+    }
   };
 
-  /* ---------- ANIMATIONS ---------- */
+  /* ---------- ANIMATIONS (SAFE VERSION) ---------- */
   const startAdditionAnimation = (A, B) => {
+    if (!A || !B || !A[0] || !B[0]) return;
     if (A.length !== B.length || A[0].length !== B[0].length) {
       setSteps(["Error: Ordo matriks harus sama!"]);
       return;
@@ -57,11 +58,11 @@ export default function App() {
     let r = 0, c = 0;
     const res = Array(A.length).fill(0).map(() => Array(A[0].length).fill(0));
     const interval = setInterval(() => {
-      const sum = A[r][c] + B[r][c];
+      const sum = (A[r][c] || 0) + (B[r][c] || 0);
       res[r][c] = sum;
       setResult([...res.map(row => [...row])]);
       setCurrentIdx({ r, c });
-      setSteps(prev => [...prev, `Pos [${r+1},${c+1}]: ${A[r][c]} + ${B[r][c]} = ${sum}`]);
+      setSteps(prev => [...prev, `[${r+1},${c+1}]: ${A[r][c]} + ${B[r][c]} = ${sum}`]);
       c++;
       if (c >= A[0].length) { c = 0; r++; }
       if (r >= A.length) { clearInterval(interval); setAnimating(false); setCurrentIdx({ r: -1, c: -1 }); }
@@ -69,15 +70,16 @@ export default function App() {
   };
 
   const startScalarAnimation = (scalar, matrix) => {
+    if (!matrix || !matrix[0]) return;
     setAnimating(true);
     let r = 0, c = 0;
     const res = Array(matrix.length).fill(0).map(() => Array(matrix[0].length).fill(0));
     const interval = setInterval(() => {
-      const prod = scalar * matrix[r][c];
+      const prod = scalar * (matrix[r][c] || 0);
       res[r][c] = prod;
       setResult([...res.map(row => [...row])]);
       setCurrentIdx({ r, c });
-      setSteps(prev => [...prev, `Pos [${r+1},${c+1}]: ${scalar} × ${matrix[r][c]} = ${prod}`]);
+      setSteps(prev => [...prev, `[${r+1},${c+1}]: ${scalar} × ${matrix[r][c]} = ${prod}`]);
       c++;
       if (c >= matrix[0].length) { c = 0; r++; }
       if (r >= matrix.length) { clearInterval(interval); setAnimating(false); setCurrentIdx({ r: -1, c: -1 }); }
@@ -85,6 +87,7 @@ export default function App() {
   };
 
   const startMatrixAnimation = (A, B) => {
+    if (!A || !B || !A[0] || !B[0]) return;
     if (A[0].length !== B.length) {
       setSteps(["Error: Kolom A harus sama dengan Baris B!"]);
       return;
@@ -96,7 +99,7 @@ export default function App() {
       let sum = 0;
       let formula = [];
       for (let k = 0; k < A[0].length; k++) {
-        sum += A[r][k] * B[k][c];
+        sum += (A[r][k] || 0) * (B[k][c] || 0);
         formula.push(`(${A[r][k]}×${B[k][c]})`);
       }
       res[r][c] = sum;
@@ -109,62 +112,42 @@ export default function App() {
     }, 700);
   };
 
-  /* ---------- CALCULATE (SAFE) ---------- */
+  /* ---------- CALCULATE ---------- */
   const calculate = () => {
     try {
       const matrices = expr.filter(e => e.type === "matrix");
-      const ops = expr.filter(e => e.type === "symbol");
+      const symbols = expr.filter(e => e.type === "symbol");
       setSteps([]); 
 
-      // 1. Matriks + Matriks
-      if (matrices.length === 2 && expr.some(e => e.value === "+")) {
+      if (matrices.length >= 2 && expr.some(e => e.value === "+")) {
         startAdditionAnimation(matrices[0].value, matrices[1].value);
-        return;
-      }
-      // 2. Matriks x Matriks
-      if (matrices.length === 2 && expr.some(e => e.value === "×")) {
+      } else if (matrices.length >= 2 && expr.some(e => e.value === "×")) {
         startMatrixAnimation(matrices[0].value, matrices[1].value);
-        return;
-      }
-      // 3. Skalar x Matriks (Cek jika ada angka diikuti tanda x dan matriks)
-      if (matrices.length === 1 && expr.some(e => e.value === "×")) {
-        const scalarValue = expr.find(e => e.type === "symbol" && !isNaN(e.value))?.value;
-        if (scalarValue) {
-          startScalarAnimation(parseFloat(scalarValue), matrices[0].value);
-          return;
-        }
-      }
-
-      // 4. Hitungan Biasa (Jika tidak ada matriks, baru jalankan eval)
-      if (matrices.length === 0) {
+      } else if (matrices.length === 1 && expr.some(e => e.value === "×")) {
+        const scalar = parseFloat(symbols.find(s => !isNaN(s.value))?.value);
+        if (!isNaN(scalar)) startScalarAnimation(scalar, matrices[0].value);
+      } else if (matrices.length === 0) {
         const raw = expr.map(e => e.value).join("");
-        if (!raw) return;
-        const res = eval(raw.replace(/×/g, "*").replace(/÷/g, "/").replace(/−/g, "-").replace(/\^/g, "**"));
-        setResult(res);
+        if (raw) setResult(eval(raw.replace(/×/g, "*").replace(/÷/g, "/").replace(/−/g, "-").replace(/\^/g, "**")));
       } else {
-        setSteps(["Gunakan + atau × untuk operasi matriks"]);
+        setSteps(["Gunakan + atau × untuk matriks"]);
       }
-    } catch (e) {
-      setSteps(["Format Error"]);
-    }
+    } catch (e) { setSteps(["Format Error"]); }
   };
 
   return (
     <div style={styles.page}>
       <div style={styles.calc}>
-        {/* DISPLAY */}
         <div style={styles.display}>
           {expr.length === 0 && !result && <div style={{color:'#444'}}>0</div>}
           {expr.map((e, idx) => (
             e.type === "matrix" ? (
-              <MatrixBox key={idx} data={e.value} matrixIdx={idx} 
-                highlightRow={currentIdx.r} highlightCol={currentIdx.c}
+              <MatrixBox key={idx} data={e.value} highlightRow={currentIdx.r} highlightCol={currentIdx.c}
                 onChange={(r,c,v) => updateMatrix(idx, r, c, v)} disabled={animating} />
             ) : <span key={idx} style={{ fontSize: 22, margin: '0 2px' }}>{e.value}</span>
           ))}
         </div>
 
-        {/* STEPS */}
         {steps.length > 0 && (
           <div style={styles.solutionBox}>
             <div style={styles.solutionHeader}>LANGKAH:</div>
@@ -172,7 +155,6 @@ export default function App() {
           </div>
         )}
 
-        {/* RESULT */}
         {result !== null && (
           <div style={{paddingTop: 10, borderTop: '1px solid #333', marginBottom: 15}}>
             {Array.isArray(result) ? (
@@ -184,7 +166,6 @@ export default function App() {
           </div>
         )}
 
-        {/* MATH BAR */}
         <div style={styles.mathBar}>
           {["√(", "π", "^", "(", ")"].map(b => (
              <button key={b} style={styles.mathBtn} onClick={() => handleBtnClick(b)}>{b}</button>
@@ -192,7 +173,6 @@ export default function App() {
           <button onClick={backspace} style={styles.delBtn}>DEL</button>
         </div>
 
-        {/* GRID */}
         <div style={styles.grid}>
           {["7", "8", "9", "÷", "4", "5", "6", "×", "1", "2", "3", "−", "0", ".", "+"].map((b) => (
             <button key={b} style={styles.btn} onClick={() => handleBtnClick(b)}>{b}</button>
@@ -216,7 +196,6 @@ export default function App() {
   );
 }
 
-/* ---------- COMPONENTS ---------- */
 const MatrixBox = ({ data, onChange, readOnly, highlightRow, highlightCol, disabled }) => (
   <div style={styles.matrixContainer}>
     {data.map((row, i) => (
@@ -236,7 +215,6 @@ const MatrixBox = ({ data, onChange, readOnly, highlightRow, highlightCol, disab
   </div>
 );
 
-/* ---------- STYLES ---------- */
 const styles = {
   page: { minHeight: "100vh", background: "#111", display: "flex", padding: "20px", justifyContent: "center", alignItems: "flex-start", fontFamily: "sans-serif" },
   calc: { width: 420, padding: 20, background: "#222", borderRadius: 24, color: "white", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" },
@@ -254,7 +232,7 @@ const styles = {
   clearBtn: { gridColumn: "span 2", background: "#d32f2f", color: "white", borderRadius: 12, border: "none" },
   matrixBtn: { gridColumn: "span 2", background: "#673ab7", color: "white", borderRadius: 12, border: "none" },
   matrixContainer: { borderLeft: "2px solid #fff", borderRight: "2px solid #fff", padding: "0 4px", display: "inline-block", margin: "5px" },
-  cellBase: { width: 38, height: 32, textAlign: "center", margin: 1, borderRadius: 4, fontSize: 12, outline: "none", transition: '0.3s' },
+  cellBase: { width: 38, height: 32, textAlign: "center", margin: 1, borderRadius: 4, fontSize: 12, outline: "none" },
   popup: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.95)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", zIndex: 100 },
   popupBtn: { padding: "15px 30px", background: "#2196f3", color: "white", border: "none", borderRadius: 12, fontSize: 18, fontWeight: 'bold' },
   cancelBtn: { marginTop: 30, color: "#aaa", background: "none", border: "1px solid #444", padding: "8px 20px", borderRadius: 6 }
